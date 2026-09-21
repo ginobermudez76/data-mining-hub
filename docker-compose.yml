@@ -1,0 +1,13 @@
+services:
+  analytics:
+    build:
+      context: ./apps/analytics
+      dockerfile: Dockerfile
+    container_name: dm_analytics
+    volumes:
+      # Montar código local para reflejar cambios sin reconstruir la imagen
+      - ./apps/analytics:/workspace/apps/analytics
+    environment:
+      - PYTHONPATH=/workspace/apps/analytics
+    working_dir: /workspace/apps/analytics
+    command: tail -f /dev/null
