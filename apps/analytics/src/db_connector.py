@@ -20,7 +20,7 @@ def get_database_engine(connection_url: Optional[str] = None) -> Engine:
     # 2. Configura el pool de conexiones de SQLAlchemy
     return create_engine(
         url,
-        pool_size=5,       # Número base de conexiones permanentes en el pool
+        pool_size=15,       # Número base de conexiones permanentes en el pool
         max_overflow=10,   # Conexiones adicionales temporales permitidas en picos de demanda
         pool_recycle=1800, # Tiempo en segundos (30 min) tras el cual se renuevan las conexiones
         echo=False         # Suprime los logs de depuración SQL en la salida estándar
