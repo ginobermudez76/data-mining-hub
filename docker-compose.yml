@@ -22,7 +22,7 @@ services:
       POSTGRES_PASSWORD: dm_password
       POSTGRES_DB: enterprise_warehouse
     ports:
-      - "5437:5432"
+      - "127.0.0.1:5437:5432"
     volumes:
       - ./init-db:/docker-entrypoint-initdb.d
       - pg_data:/var/lib/postgresql/data
@@ -35,7 +35,7 @@ services:
       dockerfile: Dockerfile
     container_name: dm_analytics
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./apps/analytics:/workspace/apps/analytics
     environment:
@@ -54,7 +54,7 @@ services:
       dockerfile: Dockerfile
     container_name: dm_web
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     volumes:
       - ./apps/web:/app
       - /app/node_modules
