@@ -2,20 +2,29 @@
 import os
 from typing import Generator, Optional
 import pandas as pd
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-# Cadena de conexión por defecto hacia la base de datos PostgreSQL
-DEFAULT_DB_URL = "postgresql+psycopg2://USUARIO:PASSWORD@postgres_db:5432/enterprise_warehouse"
+# Carga un .env local si existe (ejecución fuera de Docker). Dentro del
+# contenedor la URL llega como variable de entorno DB_URL (docker-compose).
+# Las credenciales NUNCA se escriben en el código fuente.
+load_dotenv()
 
 def get_database_engine(connection_url: Optional[str] = None) -> Engine:
     """
     Crea un motor de conexión utilizando SQLAlchemy con connection pooling configurado.
     
-    Aplica una jerarquía de configuración: URL explícita > Variable de entorno > URL por defecto.
+    Jerarquía de configuración: URL explícita > variable de entorno DB_URL.
+    Si ninguna está definida, falla con un mensaje claro.
     """
-    # 1. Selecciona la URL priorizando el parámetro directo, luego el entorno y finalmente el valor por defecto
-    url = connection_url or os.getenv("DB_URL", DEFAULT_DB_URL)
+    # 1. Selecciona la URL priorizando el parámetro directo y luego el entorno
+    url = connection_url or os.getenv("DB_URL")
+    if not url:
+        raise RuntimeError(
+            "DB_URL no está definida. Configúrala como variable de entorno "
+            "o en un archivo .env (ver .env.example)."
+        )
     
     # 2. Configura el pool de conexiones de SQLAlchemy
     return create_engine(
