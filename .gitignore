@@ -5,3 +5,11 @@ data/raw/
 *.env    
 .DS_Store    
 .pytest_cache/    
+
+
+.mcp.json
+mcp_config.json
+docs/
+node_modules/
+dist/
+silabo

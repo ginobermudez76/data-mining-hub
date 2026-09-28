@@ -26,11 +26,16 @@ def get_database_engine(connection_url: Optional[str] = None) -> Engine:
         echo=False         # Suprime los logs de depuración SQL en la salida estándar
     )
 
-def extract_raw_data(query: str, engine: Optional[Engine] = None) -> pd.DataFrame:
+def extract_raw_data(
+    query: str,
+    params: Optional[dict] = None,
+    engine: Optional[Engine] = None
+) -> pd.DataFrame:
     """
     Ejecuta una consulta SQL y carga la totalidad del resultado en un DataFrame de Pandas.
     
     Recomendado para volúmenes de datos pequeños o medianos que quepan holgadamente en RAM.
+    Acepta `params` para consultas parametrizadas (previene inyección SQL).
     """
     # Reutiliza el motor inyectado o instancia uno nuevo
     active_engine = engine or get_database_engine()
@@ -38,13 +43,13 @@ def extract_raw_data(query: str, engine: Optional[Engine] = None) -> pd.DataFram
     # Gestiona el ciclo de vida de la conexión mediante context manager
     with active_engine.connect() as connection:
         # text(query) convierte el string en un objeto SQL ejecutable compatible con SQLAlchemy 2.0+
-        df = pd.read_sql_query(text(query), con=connection)
+        df = pd.read_sql_query(text(query), con=connection, params=params)
         
     return df
 
 def extract_raw_data_in_chunks(
     query: str,
-    chunk_size: int = 500,
+    chunk_size: int = 3,
     engine: Optional[Engine] = None
 ) -> Generator[pd.DataFrame, None, None]:
     """

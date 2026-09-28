@@ -21,3 +21,6 @@ jobs:
         run: |
           docker compose build analytics
           docker compose run --rm analytics pytest -v tests/
+
+      - name: Construir imagen del frontend
+        run: docker compose build web
