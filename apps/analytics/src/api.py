@@ -8,12 +8,17 @@ SQLAlchemy y el pool de conexiones ya configurados.
 """
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from src.db_connector import extract_raw_data, get_database_engine
+from src.eda import (
+    build_eda_figure,
+    filter_outliers,
+    generate_server_metrics,
+)
 
 
 class TransactionIn(BaseModel):
@@ -186,3 +191,50 @@ def stats_summary() -> list[dict]:
     )
     desc = df.describe().T.reset_index(names="feature")
     return desc[["feature", "mean", "std", "min", "max"]].to_dict(orient="records")
+
+
+# ── U2-T2: Análisis Exploratorio de Datos (dataset de métricas de servidor) ──
+
+
+@app.get("/api/eda/metrics")
+def eda_metrics() -> list[dict]:
+    """Devuelve el dataset sintético de métricas del servidor (1000 filas)."""
+    df = generate_server_metrics()
+    df["fecha"] = df["fecha"].astype(str)
+    return df.round(3).to_dict(orient="records")
+
+
+@app.get("/api/eda/summary")
+def eda_summary() -> list[dict]:
+    """Estadísticas descriptivas del dataset de métricas del servidor."""
+    df = generate_server_metrics()
+    desc = df[["tiempo_respuesta", "usuarios_concurrentes"]].describe().T
+    desc = desc.reset_index(names="feature")
+    return desc[["feature", "mean", "std", "min", "max"]].round(3).to_dict(
+        orient="records"
+    )
+
+
+@app.get("/api/eda/outliers")
+def eda_outliers(
+    threshold: float = Query(default=250.0, ge=0),
+) -> list[dict]:
+    """Reto 3: filas con tiempo_respuesta por encima del umbral."""
+    df = filter_outliers(generate_server_metrics(), threshold)
+    df["fecha"] = df["fecha"].astype(str)
+    return df.round(3).to_dict(orient="records")
+
+
+@app.get("/api/eda/figure")
+def eda_figure(
+    bins: int = Query(default=30, ge=1, le=500),
+    panel_b: str = Query(default="density", pattern="^(density|scatter)$"),
+    hue_server: bool = False,
+) -> Response:
+    """Figura 2x2 del notebook renderizada a PNG.
+
+    Parametrizable para los retos de la sesión práctica:
+    bins (Reto 1), panel_b density/scatter (Reto 2), hue_server (Reto 4).
+    """
+    png = build_eda_figure(bins=bins, panel_b=panel_b, hue_server=hue_server)
+    return Response(content=png, media_type="image/png")

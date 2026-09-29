@@ -7,7 +7,7 @@ import Modal from '../../components/Modal'
 export const meta = {
   id: 'gestion',
   title: 'Gestión de datos',
-  unit: 'U2 · Datos',
+  unit: 'U2-T1 · Extracción',
   icon: Database,
   order: 3,
 }

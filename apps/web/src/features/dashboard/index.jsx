@@ -8,7 +8,7 @@ import DataTable from '../../components/DataTable'
 export const meta = {
   id: 'dashboard',
   title: 'Dashboard',
-  unit: 'U2 · Datos',
+  unit: 'General',
   icon: LayoutDashboard,
   order: 1,
 }

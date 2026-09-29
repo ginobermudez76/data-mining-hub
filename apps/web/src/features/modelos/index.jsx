@@ -4,8 +4,8 @@ export const meta = {
   id: 'modelos',
   title: 'Modelos predictivos',
   unit: 'U3 · Modelado',
+  order: 5,
   icon: BrainCircuit,
-  order: 4,
   ready: false, // se habilita cuando existan endpoints /api/predict, /api/cluster
 }
 

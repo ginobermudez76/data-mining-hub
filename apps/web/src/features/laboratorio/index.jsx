@@ -6,7 +6,7 @@ import DataTable from '../../components/DataTable'
 export const meta = {
   id: 'laboratorio',
   title: 'Laboratorio U2-T1',
-  unit: 'U2 · Datos',
+  unit: 'U2-T1 · Extracción',
   icon: FlaskConical,
   order: 2,
 }
@@ -67,8 +67,8 @@ export default function Laboratorio() {
             onClick={() => run(ex)}
             title={ex.description}
             className={`rounded-lg px-3 py-2 text-sm font-medium transition ${active === ex.id
-                ? 'bg-indigo-600 text-white'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
           >
             {ex.id}. {ex.name}
