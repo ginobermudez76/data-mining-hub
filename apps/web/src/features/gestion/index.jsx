@@ -3,6 +3,7 @@ import { Database, Pencil, Plus, Trash2 } from 'lucide-react'
 import { apiGet, apiSend } from '../../api'
 import DataTable from '../../components/DataTable'
 import Modal from '../../components/Modal'
+import InfoTip from '../../components/InfoTip'
 
 export const meta = {
   id: 'gestion',
@@ -133,13 +134,17 @@ export default function GestionDatos() {
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500">
           Alta, edición y baja de registros sin entrar a la base de datos.
+          <InfoTip text="Los botones Editar/Eliminar de cada fila ejecutan PUT y DELETE al API, que actualiza PostgreSQL con queries parametrizadas." />
         </p>
-        <button
-          onClick={startCreate}
-          className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          <Plus className="h-4 w-4" /> Nuevo registro
-        </button>
+        <span className="inline-flex items-center gap-1">
+          <button
+            onClick={startCreate}
+            className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            <Plus className="h-4 w-4" /> Nuevo registro
+          </button>
+          <InfoTip text="Abre el formulario para insertar una transacción: se valida con Pydantic en el API antes del INSERT en PostgreSQL." />
+        </span>
       </div>
 
       {error && (
@@ -195,12 +200,21 @@ export default function GestionDatos() {
             </label>
           </div>
           <div className="mt-4 flex gap-2">
-            <button
-              type="submit"
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-            >
-              {editingId === null ? 'Crear' : 'Guardar cambios'}
-            </button>
+            <span className="inline-flex items-center gap-1">
+              <button
+                type="submit"
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                {editingId === null ? 'Crear' : 'Guardar cambios'}
+              </button>
+              <InfoTip
+                text={
+                  editingId === null
+                    ? 'Envía el formulario al API (POST): valida los campos e inserta el registro en PostgreSQL.'
+                    : 'Envía el formulario al API (PUT): valida los campos y actualiza el registro existente en PostgreSQL.'
+                }
+              />
+            </span>
             <button
               type="button"
               onClick={() => setShowForm(false)}

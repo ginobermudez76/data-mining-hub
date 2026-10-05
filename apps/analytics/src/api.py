@@ -13,6 +13,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
+from src.cleaning import (
+    CLEAN_TABLE,
+    RAW_TABLE,
+    IMPUTATION_STRATEGIES,
+    NUMERIC_COLS,
+    OUTLIER_ACTIONS,
+    DETECTION_METHODS,
+    audit_frame,
+    impute_column,
+    load_table,
+    normalize_frame,
+    run_cleaning_pipeline,
+    treat_outliers,
+)
 from src.db_connector import extract_raw_data, get_database_engine
 from src.eda import (
     build_eda_figure,
@@ -238,3 +252,81 @@ def eda_figure(
     """
     png = build_eda_figure(bins=bins, panel_b=panel_b, hue_server=hue_server)
     return Response(content=png, media_type="image/png")
+
+
+# ── U2-T3: Limpieza y calidad de datos (crudo -> tabla limpia) ────────────────
+
+
+def _load_or_404(target: str):
+    """Carga la tabla cruda o la limpia; 404 si la limpia aún no existe."""
+    table = CLEAN_TABLE if target == "clean" else RAW_TABLE
+    try:
+        return load_table(table)
+    except Exception:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tabla '{table}' no existe: ejecuta el pipeline primero",
+        )
+
+
+@app.get("/api/cleaning/audit")
+def cleaning_audit(
+    target: str = Query(default="raw", pattern="^(raw|clean)$"),
+) -> dict:
+    """Reporte de calidad: nulos, duplicados, inconsistencias y outliers."""
+    return audit_frame(_load_or_404(target))
+
+
+@app.get("/api/cleaning/preview/imputation")
+def cleaning_preview_imputation(
+    column: str = Query(pattern="^(age|annual_income|credit_score|loan_amount|region)$"),
+    strategy: str = Query(default="median", pattern="^(mean|median|mode|knn)$"),
+) -> dict:
+    """Preview de imputación: estadísticas antes/después sin tocar la DB."""
+    df = _load_or_404("raw")
+    try:
+        _, report = impute_column(df, column, strategy)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"column": column, "strategy": strategy, **report}
+
+
+@app.get("/api/cleaning/preview/outliers")
+def cleaning_preview_outliers(
+    column: str = Query(default="annual_income"),
+    method: str = Query(default="iqr", pattern="^(iqr|zscore)$"),
+    action: str = Query(default="cap", pattern="^(drop|cap|log)$"),
+) -> dict:
+    """Preview del tratamiento de outliers sobre una columna numérica."""
+    df = _load_or_404("raw")
+    if column not in NUMERIC_COLS:
+        raise HTTPException(422, f"'{column}' no es numérica")
+    try:
+        _, report = treat_outliers(df, column, method, action)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"column": column, "method": method, "action": action, **report}
+
+
+@app.get("/api/cleaning/preview/normalization")
+def cleaning_preview_normalization() -> dict:
+    """Preview de la normalización de inconsistencias (regiones, rangos)."""
+    _, report = normalize_frame(_load_or_404("raw"))
+    return report
+
+
+@app.post("/api/cleaning/run")
+def cleaning_run() -> dict:
+    """Ejecuta el pipeline raw -> clean y materializa customer_credit_clean."""
+    return run_cleaning_pipeline()
+
+
+@app.get("/api/cleaning/rows")
+def cleaning_rows(
+    target: str = Query(default="clean", pattern="^(raw|clean)$"),
+    limit: int = Query(default=500, ge=1, le=5000),
+) -> list[dict]:
+    """Muestra las filas de la tabla elegida (para inspeccionar el resultado)."""
+    df = _load_or_404(target).head(limit)
+    df["created_at"] = df["created_at"].astype(str)
+    return df.to_dict(orient="records")

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BarChart3 } from 'lucide-react'
 import { apiGet } from '../../api'
 import DataTable from '../../components/DataTable'
+import InfoTip from '../../components/InfoTip'
 
 export const meta = {
   id: 'eda',
@@ -37,7 +38,7 @@ export default function Eda() {
     apiGet('/api/eda/summary').then(setSummary).catch((e) => setError(e.message))
     apiGet('/api/eda/outliers?threshold=250')
       .then(setOutliers)
-      .catch(() => {})
+      .catch(() => { })
   }, [])
 
   const runOutliers = () =>
@@ -132,12 +133,15 @@ export default function Eda() {
               className="ml-2 w-24 rounded-lg border border-slate-300 px-2 py-1 text-sm"
             />
           </label>
-          <button
-            onClick={runOutliers}
-            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
-          >
-            Filtrar
-          </button>
+          <span className="inline-flex items-center gap-1">
+            <button
+              onClick={runOutliers}
+              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+            >
+              Filtrar
+            </button>
+            <InfoTip text="Devuelve los registros cuyo tiempo_respuesta supera el umbral indicado — el Reto 3 del notebook: aislar los outliers para inspeccionarlos." />
+          </span>
           <span className="text-xs text-slate-500">
             {outliers.length} registro(s) por encima del umbral
           </span>
