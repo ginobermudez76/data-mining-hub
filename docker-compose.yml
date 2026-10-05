@@ -15,7 +15,7 @@
 services:
   postgres_db:
     image: postgres:16-alpine
-    container_name: dm_postgres
+    container_name: dm_postgres2
     restart: always
     environment:
       POSTGRES_USER: dm_user
@@ -33,7 +33,7 @@ services:
     build:
       context: ./apps/analytics
       dockerfile: Dockerfile
-    container_name: dm_analytics
+    container_name: dm_analytics2
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -52,7 +52,7 @@ services:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
-    container_name: dm_web
+    container_name: dm_web2
     ports:
       - "127.0.0.1:5173:5173"
     volumes:
