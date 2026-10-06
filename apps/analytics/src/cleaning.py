@@ -35,8 +35,11 @@ VALID_RANGES = {
     "loan_amount": (0, 100_000),
 }
 
+# Whitelist oficial de regiones válidas del negocio (B1)
+VALID_REGIONS = {"Costa", "Sierra", "Oriente", "Insular"}
+
 IMPUTATION_STRATEGIES = ("mean", "median", "mode", "knn")
-DETECTION_METHODS = ("iqr", "zscore")
+DETECTION_METHODS = ("iqr", "zscore", "mad")
 OUTLIER_ACTIONS = ("drop", "cap", "log")
 
 
@@ -121,9 +124,15 @@ def normalize_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     if "region" in out.columns:
         before = out["region"].copy()
         out["region"] = out["region"].astype("string").str.strip().str.title()
+        # Regla de negocio B1: si la región no pertenece a la whitelist oficial, convertir a NaN
+        invalid_region_mask = out["region"].notna() & ~out["region"].isin(VALID_REGIONS)
+        invalid_region_count = int(invalid_region_mask.sum())
+        out.loc[invalid_region_mask, "region"] = np.nan
+
         changed = int((before != out["region"]).sum())
         report["region"] = {
             "normalized": changed,
+            "invalid_whitelist": invalid_region_count,
             "variants_after": out["region"].fillna("(nulo)")
             .value_counts()
             .to_dict(),
@@ -179,7 +188,7 @@ def impute_column(
 def detect_outlier_mask(
     df: pd.DataFrame, column: str, method: str
 ) -> pd.Series:
-    """Máscara booleana de outliers: ``iqr`` (1.5·IQR) o ``zscore`` (|z|>3)."""
+    """Máscara booleana de outliers: ``iqr`` (1.5·IQR), ``zscore`` (|z|>3) o ``mad`` (|modified z|>3)."""
     s = df[column].dropna()
     if method == "zscore":
         std = s.std()
@@ -187,6 +196,15 @@ def detect_outlier_mask(
             return pd.Series(False, index=df.index)
         z = (df[column] - s.mean()) / std
         return z.abs() > 3
+    elif method == "mad":
+        med = s.median()
+        mad = (s - med).abs().median()
+        if mad == 0 or pd.isna(mad):
+            return pd.Series(False, index=df.index)
+        # 1.4826 es el factor de consistencia para una distribución normal
+        mad_sigma = 1.4826 * mad
+        return (df[column] - med).abs() > 3.0 * mad_sigma
+
     q1, q3 = s.quantile(0.25), s.quantile(0.75)
     iqr = q3 - q1
     return (df[column] < q1 - 1.5 * iqr) | (df[column] > q3 + 1.5 * iqr)
@@ -213,6 +231,11 @@ def treat_outliers(
         s = df[column].dropna()
         if method == "zscore":
             lo, hi = s.mean() - 3 * s.std(), s.mean() + 3 * s.std()
+        elif method == "mad":
+            med = s.median()
+            mad = (s - med).abs().median()
+            mad_sigma = 1.4826 * mad if mad > 0 else s.std()
+            lo, hi = med - 3.0 * mad_sigma, med + 3.0 * mad_sigma
         else:
             q1, q3, iqr = s.quantile(0.25), s.quantile(0.75), (
                 s.quantile(0.75) - s.quantile(0.25)
@@ -230,15 +253,24 @@ def treat_outliers(
     }
 
 
-def run_cleaning_pipeline() -> dict:
+def run_cleaning_pipeline(
+    strategy: str = "median",
+    outlier_method: str = "iqr",
+    outlier_action: str = "cap",
+) -> dict:
     """Ejecuta el pipeline completo raw -> clean y escribe CLEAN_TABLE.
 
     Pasos (documentados para la clase):
-      1. Normalización de inconsistencias (regiones, rangos inválidos).
+      1. Normalización de inconsistencias (regiones, rangos inválidos, whitelist B1).
       2. Eliminación de duplicados exactos.
-      3. Imputación por mediana en numéricas (robusta ante outliers)
+      3. Imputación según estrategia en numéricas (robusta ante outliers)
          y por moda en `region`.
-      4. Acotamiento (capping IQR) de outliers en ingresos y préstamos.
+      4. Tratamiento de outliers en ingresos y préstamos según método y acción elegidos.
+
+    Parámetros configurables (B1):
+      - strategy: 'mean', 'median', o 'knn' (defecto: 'median').
+      - outlier_method: 'iqr', 'zscore' o 'mad' (defecto: 'iqr').
+      - outlier_action: 'cap', 'drop' o 'log' (defecto: 'cap').
     """
     raw = load_table(RAW_TABLE)
     steps = []
@@ -251,14 +283,14 @@ def run_cleaning_pipeline() -> dict:
     steps.append({"step": "deduplicación", "detail": {"removed": int(dup.sum())}})
 
     for col in NUMERIC_COLS:
-        clean, rep = impute_column(clean, col, "median")
-        steps.append({"step": f"imputación mediana `{col}`", "detail": rep})
+        clean, rep = impute_column(clean, col, strategy)
+        steps.append({"step": f"imputación {strategy} `{col}`", "detail": rep})
     clean, rep = impute_column(clean, "region", "mode")
     steps.append({"step": "imputación moda `region`", "detail": rep})
 
     for col in ("annual_income", "loan_amount"):
-        clean, rep = treat_outliers(clean, col, "iqr", "cap")
-        steps.append({"step": f"capping IQR `{col}`", "detail": rep})
+        clean, rep = treat_outliers(clean, col, outlier_method, outlier_action)
+        steps.append({"step": f"{outlier_action} {outlier_method.upper()} `{col}`", "detail": rep})
 
     engine = get_database_engine()
     clean.to_sql(CLEAN_TABLE, engine, if_exists="replace", index=False)

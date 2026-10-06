@@ -2,12 +2,11 @@
 Autor: Gino Maximiliano Bermúdez Santos
 Repositorio: data-mining-hub
 
-Implementa un pipeline algorítmico robusto para el tratamiento de la "Tríada
-Patológica de Datos" conforme a la especificación básica de la práctica:
-1. Gestión de Inconsistencias (Normalización de formatos y validación de reglas de negocio).
-2. Tratamiento de Valores Faltantes (Imputación estadística por media, mediana, moda y KNN).
-3. Manejo Algorítmico de Outliers (Detección por IQR/3-Sigma y Acotamiento/Capping).
-4. Orquestación del pipeline y persistencia en PostgreSQL (customer_credit_clean_bermudez).
+Cumple estrictamente con la especificación básica de la práctica (Sección 1.2):
+- normalize_frame(df) -> pd.DataFrame
+- impute_column(df, column, strategy) -> pd.DataFrame
+- treat_outliers(df, column, method, action) -> pd.DataFrame
+- run_cleaning_pipeline() -> dict
 """
 
 from typing import Any, Dict, List, Optional
@@ -18,175 +17,160 @@ from sqlalchemy.engine import Engine
 
 from src.db_connector import extract_raw_data, get_database_engine
 
+RAW_TABLE = "customer_credit_transactions"
+TARGET_CLEAN_TABLE = "customer_credit_clean_bermudez"
+NUMERIC_COLS = ["age", "annual_income", "credit_score", "loan_amount"]
+
 
 # ==============================================================================
-# ACTIVIDAD 3.1: GESTIÓN DE INCONSISTENCIAS (NORMALIZACIÓN)
+# ACTIVIDAD 1.2: SPEC BÁSICA DE FUNCIONES ANALÍTICAS
 # ==============================================================================
 
-def clean_inconsistencies(
-    df: pd.DataFrame,
-    region_col: str = "region",
-    age_col: str = "age",
-    min_age: int = 18,
-    max_age: int = 100,
-) -> pd.DataFrame:
-    """Estandariza formatos categóricos y valida reglas de negocio numéricas.
-
-    - Normaliza la columna `region` eliminando espacios en blanco (strip)
-      y convirtiendo a formato Title Case (ej: '  costa ' -> 'Costa').
-    - Valida reglas de negocio en `age`: valores fuera del rango [min_age, max_age]
-      (por ejemplo, age < 18 o age > 100) son reemplazados estructuralmente
-      por NaN para forzar su paso a la fase de imputación.
-
-    Args:
-        df: DataFrame de entrada con datos crudos.
-        region_col: Nombre de la columna de región a estandarizar.
-        age_col: Nombre de la columna de edad para validación de reglas.
-        min_age: Límite de edad mínima legal según regla de negocio (defecto: 18).
-        max_age: Límite de edad máxima según regla de negocio (defecto: 100).
+def normalize_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Estandariza inconsistencias según spec 1.2:
+    - region: strip + Title Case.
+    - age: valores fuera de [18, 100] -> NaN (para forzar paso a imputación).
 
     Returns:
-        pd.DataFrame: Copia del DataFrame con datos normalizados e inconsistencias
-                      convertidas a NaN.
+        pd.DataFrame: DataFrame normalizado (sin mutar el original).
     """
-    df_clean = df.copy()
+    out = df.copy()
 
-    # 1. Normalización de formato en columna categórica 'region'
-    if region_col in df_clean.columns:
-        df_clean[region_col] = df_clean[region_col].apply(
+    # Normalización de region
+    if "region" in out.columns:
+        out["region"] = out["region"].apply(
             lambda val: str(val).strip().title() if pd.notna(val) else val
         )
 
-    # 2. Validación de regla de negocio en variable numérica 'age'
-    if age_col in df_clean.columns:
-        df_clean[age_col] = pd.to_numeric(df_clean[age_col], errors="coerce")
-        invalid_mask = (df_clean[age_col] < min_age) | (df_clean[age_col] > max_age)
-        df_clean.loc[invalid_mask, age_col] = np.nan
+    # Regla de negocio en age
+    if "age" in out.columns:
+        out["age"] = pd.to_numeric(out["age"], errors="coerce")
+        invalid_mask = (out["age"] < 18) | (out["age"] > 100)
+        out.loc[invalid_mask, "age"] = np.nan
 
-    return df_clean
-
-
-# Alias descriptivo para compatibilidad con la guía
-normalize_inconsistencies = clean_inconsistencies
+    return out
 
 
-# ==============================================================================
-# ACTIVIDAD 3.2: TRATAMIENTO DE VALORES FALTANTES (IMPUTACIÓN)
-# ==============================================================================
+# Aliases para compatibilidad
+clean_inconsistencies = normalize_frame
+normalize_inconsistencies = normalize_frame
+
 
 def impute_column(
     df: pd.DataFrame,
     column: str,
     strategy: str = "median",
-    n_neighbors: int = 3,
+    n_neighbors: int = 5,
 ) -> pd.DataFrame:
-    """Imputa valores nulos en una columna específica usando una estrategia dada.
-
-    Soporta 4 estrategias analíticas:
-    1. 'mean': Reemplazo por la media matemática (μ) para variables continuas.
-    2. 'median': Reemplazo por la mediana (robusta ante asimetría/outliers).
-    3. 'mode': Reemplazo por la moda (obligatoria para variables categóricas).
-    4. 'knn': Imputación algorítmica avanzada multivariable con KNNImputer.
-
-    Args:
-        df: DataFrame de entrada.
-        column: Nombre de la columna a imputar.
-        strategy: Estrategia ('mean', 'median', 'mode', 'knn').
-        n_neighbors: Número de vecinos para KNNImputer (aplica solo si strategy='knn').
+    """Imputa los valores NaN en `column` según la estrategia elegida:
+    - 'mean': media matemática (μ) para variables numéricas continuas.
+    - 'median': mediana (robusta ante asimetría y outliers).
+    - 'mode': moda categórica (obligatoria para 'region').
+    - 'knn': imputación algorítmica avanzada con KNNImputer (n_neighbors=5).
 
     Returns:
-        pd.DataFrame: Copia del DataFrame con la columna imputada.
-
-    Raises:
-        KeyError: Si la columna no existe en el DataFrame.
-        ValueError: Si la estrategia especificada no es soportada.
+        pd.DataFrame: DataFrame con la columna imputada (sin mutar el original).
     """
     if column not in df.columns:
         raise KeyError(f"La columna '{column}' no existe en el DataFrame.")
 
     strategy_lower = strategy.strip().lower()
-    df_result = df.copy()
+    out = df.copy()
 
-    # Si no hay nulos en la columna, retornar directamente
-    if not df_result[column].isna().any():
-        return df_result
+    if not out[column].isna().any():
+        return out
 
     if strategy_lower == "mean":
-        if not pd.api.types.is_numeric_dtype(df_result[column]):
-            raise ValueError(
-                f"La estrategia 'mean' solo aplica a columnas numéricas. Columna '{column}' es {df_result[column].dtype}."
-            )
-        mean_val = float(df_result[column].mean())
-        df_result[column] = df_result[column].fillna(mean_val)
+        if not pd.api.types.is_numeric_dtype(out[column]):
+            raise ValueError(f"Estrategia 'mean' solo aplica a columnas numéricas: {column}")
+        out[column] = out[column].fillna(float(out[column].mean()))
 
     elif strategy_lower == "median":
-        if not pd.api.types.is_numeric_dtype(df_result[column]):
-            raise ValueError(
-                f"La estrategia 'median' solo aplica a columnas numéricas. Columna '{column}' es {df_result[column].dtype}."
-            )
-        median_val = float(df_result[column].median())
-        df_result[column] = df_result[column].fillna(median_val)
+        if not pd.api.types.is_numeric_dtype(out[column]):
+            raise ValueError(f"Estrategia 'median' solo aplica a columnas numéricas: {column}")
+        out[column] = out[column].fillna(float(out[column].median()))
 
     elif strategy_lower == "mode":
-        mode_series = df_result[column].mode()
+        mode_series = out[column].mode(dropna=True)
         if not mode_series.empty:
-            mode_val = mode_series.iloc[0]
-            df_result[column] = df_result[column].fillna(mode_val)
+            out[column] = out[column].fillna(mode_series.iloc[0])
 
     elif strategy_lower == "knn":
-        if not pd.api.types.is_numeric_dtype(df_result[column]):
-            raise ValueError(
-                f"La estrategia 'knn' requiere columnas numéricas. Columna '{column}' es {df_result[column].dtype}."
-            )
+        if not pd.api.types.is_numeric_dtype(out[column]):
+            raise ValueError(f"Estrategia 'knn' requiere columna numérica: {column}")
 
-        numeric_cols = df_result.select_dtypes(include=[np.number]).columns.tolist()
-        valid_samples = int(df_result[column].notna().sum())
+        # Seleccionar todas las numéricas disponibles para modelar relaciones multivariables
+        numeric_cols = [c for c in NUMERIC_COLS if c in out.columns and pd.api.types.is_numeric_dtype(out[c])]
+        if not numeric_cols or column not in numeric_cols:
+            numeric_cols = out.select_dtypes(include=[np.number]).columns.tolist()
+
+        valid_samples = int(out[column].notna().sum())
         effective_k = max(1, min(n_neighbors, valid_samples))
 
         imputer = KNNImputer(n_neighbors=effective_k)
-        imputed_numeric_array = imputer.fit_transform(df_result[numeric_cols])
+        imputed_numeric_array = imputer.fit_transform(out[numeric_cols])
         imputed_numeric_df = pd.DataFrame(
-            imputed_numeric_array, columns=numeric_cols, index=df_result.index
+            imputed_numeric_array, columns=numeric_cols, index=out.index
         )
-        df_result[column] = imputed_numeric_df[column]
+        out[column] = imputed_numeric_df[column]
 
     else:
         raise ValueError(
-            f"Estrategia '{strategy}' no válida. Opciones soportadas: 'mean', 'median', 'mode', 'knn'."
+            f"Estrategia '{strategy}' no soportada. Use 'mean', 'median', 'mode' o 'knn'."
         )
 
-    return df_result
+    return out
 
 
-def impute_missing_values(
+def treat_outliers(
     df: pd.DataFrame,
-    numeric_strategy: str = "median",
-    categorical_strategy: str = "mode",
-    n_neighbors: int = 3,
+    column: str,
+    method: str = "iqr",
+    action: str = "cap",
 ) -> pd.DataFrame:
-    """Aplica imputación sistemática a todas las columnas del DataFrame que contengan nulos."""
-    df_imputed = df.copy()
-    columns_with_nulls = [c for c in df_imputed.columns if df_imputed[c].isna().any()]
+    """Detecta y trata outliers según la spec 1.2:
+    - Detección: 'zscore' (3σ) e 'iqr' (1.5·IQR).
+    - Acción: 'cap' (acotamiento a umbrales para preservar el 100% de filas).
 
-    for col in columns_with_nulls:
-        if pd.api.types.is_numeric_dtype(df_imputed[col]):
-            df_imputed = impute_column(
-                df_imputed,
-                col,
-                strategy=numeric_strategy,
-                n_neighbors=n_neighbors,
-            )
-        else:
-            df_imputed = impute_column(
-                df_imputed, col, strategy=categorical_strategy
-            )
+    Returns:
+        pd.DataFrame: DataFrame con valores acotados (sin mutar el original).
+    """
+    if column not in df.columns or not pd.api.types.is_numeric_dtype(df[column]):
+        return df.copy()
 
-    return df_imputed
+    method_lower = method.strip().lower()
+    action_lower = action.strip().lower()
+    out = df.copy()
+    s = out[column].dropna()
 
+    if s.empty:
+        return out
 
-# ==============================================================================
-# ACTIVIDAD 3.3: MANEJO ALGORÍTMICO DE OUTLIERS (ACOTADO / CAPPING)
-# ==============================================================================
+    if method_lower == "iqr":
+        q1 = float(s.quantile(0.25))
+        q3 = float(s.quantile(0.75))
+        iqr = q3 - q1
+        lo = q1 - 1.5 * iqr
+        hi = q3 + 1.5 * iqr
+    elif method_lower in ["zscore", "3sigma"]:
+        mean_val = float(s.mean())
+        std_val = float(s.std(ddof=1)) if len(s) > 1 else 0.0
+        lo = mean_val - 3.0 * std_val
+        hi = mean_val + 3.0 * std_val
+    else:
+        raise ValueError(f"Método '{method}' no soportado. Use 'iqr' o 'zscore'.")
+
+    # En finanzas, límites negativos en ingresos o préstamos se acotan en cero
+    if lo < 0:
+        lo = 0.0
+
+    if action_lower == "cap":
+        out[column] = out[column].clip(lower=lo, upper=hi)
+    else:
+        raise ValueError(f"Acción '{action}' no soportada en spec básica. Use 'cap'.")
+
+    return out
+
 
 def cap_outliers(
     df: pd.DataFrame,
@@ -195,74 +179,32 @@ def cap_outliers(
     factor: Optional[float] = None,
     min_zero: bool = True,
 ) -> pd.DataFrame:
-    """Detecta y trata valores atípicos mediante la técnica de Acotamiento (Capping/Winsorization).
-
-    En lugar de descartar registros (lo que sesga el modelo y destruye muestras valiosas),
-    se fijan umbrales estadísticos y se acotan los valores extremos (clipping), preservando
-    el 100% de las filas del dataset.
-
-    Métodos estadísticos de detección soportados:
-    - 'iqr': Rango Intercuartílico:
-        IQR = Q3 - Q1
-        Upper = Q3 + (factor * IQR) [defecto: 1.5]
-        Lower = Q1 - (factor * IQR)
-    - '3sigma' / 'zscore': Regla empírica del límite:
-        Upper = μ + (factor * σ) [defecto: 3.0]
-        Lower = μ - (factor * σ)
-
-    Args:
-        df: DataFrame de entrada.
-        columns: Lista de columnas a tratar (por defecto: ['annual_income', 'loan_amount']).
-        method: Método de detección ('iqr', '3sigma', 'zscore').
-        factor: Factor multiplicador opcional (1.5 para IQR, 3.0 para 3sigma si es None).
-        min_zero: Si es True, asegura que el límite inferior no sea negativo para variables financieras.
-
-    Returns:
-        pd.DataFrame: Copia del DataFrame con valores extremos acotados.
-    """
-    target_columns = columns or ["annual_income", "loan_amount"]
-    method_lower = method.strip().lower()
-    df_capped = df.copy()
-
-    for col in target_columns:
-        if col not in df_capped.columns or not pd.api.types.is_numeric_dtype(
-            df_capped[col]
-        ):
-            continue
-
-        series = df_capped[col].dropna()
-        if series.empty:
-            continue
-
-        if method_lower == "iqr":
-            effective_factor = 1.5 if factor is None else factor
-            q1 = float(series.quantile(0.25))
-            q3 = float(series.quantile(0.75))
-            iqr = q3 - q1
-            upper_limit = q3 + (effective_factor * iqr)
-            lower_limit = q1 - (effective_factor * iqr)
-
-        elif method_lower in ["3sigma", "zscore", "std"]:
-            effective_factor = 3.0 if factor is None else factor
-            mean_val = float(series.mean())
-            std_val = float(series.std(ddof=1)) if len(series) > 1 else 0.0
-            upper_limit = mean_val + (effective_factor * std_val)
-            lower_limit = mean_val - (effective_factor * std_val)
-
-        else:
-            raise ValueError(
-                f"Método '{method}' no soportado. Use 'iqr' o '3sigma'."
-            )
-
-        if min_zero and lower_limit < 0:
-            lower_limit = 0.0
-
-        df_capped[col] = df_capped[col].clip(lower=lower_limit, upper=upper_limit)
-
-    return df_capped
+    """Wrapper multi-columna para treat_outliers compatible con suites anteriores."""
+    target_cols = columns or ["annual_income", "loan_amount"]
+    out = df.copy()
+    for col in target_cols:
+        out = treat_outliers(out, col, method=method, action="cap")
+    return out
 
 
 handle_outliers = cap_outliers
+
+
+def impute_missing_values(
+    df: pd.DataFrame,
+    numeric_strategy: str = "median",
+    categorical_strategy: str = "mode",
+) -> pd.DataFrame:
+    """Imputa sistemáticamente todas las columnas con nulos."""
+    out = df.copy()
+    for col in out.columns:
+        if not out[col].isna().any():
+            continue
+        if pd.api.types.is_numeric_dtype(out[col]):
+            out = impute_column(out, col, strategy=numeric_strategy)
+        else:
+            out = impute_column(out, col, strategy=categorical_strategy)
+    return out
 
 
 # ==============================================================================
@@ -364,80 +306,69 @@ def print_quality_audit_report(
 
 
 # ==============================================================================
-# ACTIVIDAD 4: INTEGRACIÓN (PIPELINE FINAL ORQUESTADOR)
+# PIPELINE ORQUESTADOR
 # ==============================================================================
-
-TARGET_CLEAN_TABLE = "customer_credit_clean_bermudez"
 
 def run_cleaning_pipeline(
     engine: Optional[Engine] = None,
     df: Optional[pd.DataFrame] = None,
     save_to_db: bool = True,
     target_table: str = TARGET_CLEAN_TABLE,
-    source_query: str = "SELECT * FROM customer_credit_transactions ORDER BY transaction_id;",
+    source_query: str = f"SELECT * FROM {RAW_TABLE} ORDER BY transaction_id;",
     imputation_strategy: str = "median",
     outlier_method: str = "iqr",
     verbose: bool = True,
-) -> pd.DataFrame:
-    """Orquesta secuencialmente el pipeline completo de preparación y calidad de datos.
+) -> dict:
+    """Orquesta el pipeline completo de la spec 1.2:
+    1. Normalizar (normalize_frame).
+    2. Imputar (impute_column por columna).
+    3. Tratar outliers (treat_outliers con cap IQR en annual_income y loan_amount).
+    4. Persistir en PostgreSQL (to_sql en customer_credit_clean_bermudez).
 
-    Secuencia de ejecución:
-    1. Extracción de datos crudos (desde PostgreSQL o DataFrame provisto).
-    2. Filtro y resolución de inconsistencias:
-       - Normalización de formato de la columna 'region' (Strip y Title Case).
-       - Detección de reglas de negocio en 'age' (< 18 o > 100 -> NaN).
-    3. Tratamiento de valores faltantes (Imputación estadística/KNN y Moda para categóricos).
-    4. Detección y acotamiento de Outliers (Capping en 'annual_income' y 'loan_amount').
-    5. Persistencia automatizada en PostgreSQL en la tabla `customer_credit_clean_bermudez`.
+    Returns:
+        dict: Resumen con tabla destino, filas de entrada y salida, y el DataFrame limpio.
     """
     db_engine = engine or get_database_engine()
 
     if df is not None:
-        df_raw = df.copy()
+        raw = df.copy()
     else:
-        df_raw = extract_raw_data(source_query, engine=db_engine)
+        raw = extract_raw_data(source_query, engine=db_engine)
 
     if verbose:
-        print(f"[Pipeline Bermúdez] Iniciando limpieza de datos...")
-        print(f"[Pipeline Bermúdez] Filas iniciales: {len(df_raw)}, Columnas: {len(df_raw.columns)}")
+        print(f"[Pipeline Bermúdez] Iniciando pipeline de limpieza spec 1.2...")
+        print(f"[Pipeline Bermúdez] Filas iniciales: {len(raw)}, Columnas: {len(raw.columns)}")
 
-    df_step1 = clean_inconsistencies(
-        df_raw, region_col="region", age_col="age", min_age=18, max_age=100
-    )
+    # 1. Normalización
+    clean = normalize_frame(raw)
 
-    df_step2 = impute_missing_values(
-        df_step1,
-        numeric_strategy=imputation_strategy,
-        categorical_strategy="mode",
-        n_neighbors=3,
-    )
+    # 2. Imputación
+    for col in NUMERIC_COLS:
+        if col in clean.columns and clean[col].isna().any():
+            clean = impute_column(clean, col, strategy=imputation_strategy, n_neighbors=5)
+    if "region" in clean.columns and clean["region"].isna().any():
+        clean = impute_column(clean, "region", strategy="mode")
 
-    df_step3 = cap_outliers(
-        df_step2,
-        columns=["annual_income", "loan_amount"],
-        method=outlier_method,
-        factor=1.5,
-        min_zero=True,
-    )
+    # 3. Outliers (capping IQR en annual_income y loan_amount)
+    for col in ["annual_income", "loan_amount"]:
+        if col in clean.columns:
+            clean = treat_outliers(clean, col, method=outlier_method, action="cap")
 
-    df_clean = df_step3
-
+    # 4. Persistencia en PostgreSQL
     if save_to_db and db_engine is not None:
-        if verbose:
-            print(f"[Pipeline Bermúdez] Guardando datos en la tabla '{target_table}'...")
-        df_clean.to_sql(
-            name=target_table,
-            con=db_engine,
-            if_exists="replace",
-            index=False,
-        )
+        clean.to_sql(target_table, con=db_engine, if_exists="replace", index=False)
         if verbose:
             print(f"[Pipeline Bermúdez] Tabla '{target_table}' guardada exitosamente en PostgreSQL.")
 
     if verbose:
-        print_quality_audit_report(df_raw, df_clean, target_column="annual_income")
+        print_quality_audit_report(raw, clean, target_column="annual_income")
 
-    return df_clean
+    return {
+        "clean_table": target_table,
+        "rows_in": int(len(raw)),
+        "rows_out": int(len(clean)),
+        "dataframe": clean,
+    }
 
 
 if __name__ == "__main__":

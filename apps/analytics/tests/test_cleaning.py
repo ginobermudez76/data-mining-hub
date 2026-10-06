@@ -76,3 +76,36 @@ def test_treat_outliers_actions():
     assert out["annual_income"].max() < 500_000
     out, _ = treat_outliers(df, "annual_income", "iqr", "log")
     assert out["annual_income"].max() < 20  # log1p(500K) ≈ 13.1
+
+
+# ── Pruebas de extensión Parte B1 (Ingeniería de Software) ───────────────────
+
+def test_mad_outlier_detection_resists_masking():
+    """B1: MAD es robusto ante el efecto masking y detecta el outlier de 500K."""
+    df = _dirty_frame()
+    # Z-score falla por masking (std inflada por 500K)
+    assert detect_outlier_mask(df, "annual_income", "zscore").sum() == 0
+    # MAD detecta el outlier de 500K con precisión
+    assert detect_outlier_mask(df, "annual_income", "mad").sum() == 1
+    # treat_outliers con mad y cap acota el valor
+    out, rep = treat_outliers(df, "annual_income", "mad", "cap")
+    assert rep["detected"] == 1
+    assert out["annual_income"].max() < 500_000
+
+
+def test_normalize_frame_region_whitelist():
+    """B1: Regiones que no pertenezcan a la whitelist oficial se convierten a NaN."""
+    df = pd.DataFrame(
+        {
+            "region": ["Costa", "SIERRA", "Madrid", "Galapagos", "  oriente "],
+            "age": [25, 30, 35, 40, 45],
+        }
+    )
+    clean, report = normalize_frame(df)
+    # Madrid y Galapagos no están en {'Costa', 'Sierra', 'Oriente', 'Insular'}
+    assert pd.isna(clean.loc[2, "region"])
+    assert pd.isna(clean.loc[3, "region"])
+    assert clean.loc[0, "region"] == "Costa"
+    assert clean.loc[1, "region"] == "Sierra"
+    assert clean.loc[4, "region"] == "Oriente"
+    assert report["region"]["invalid_whitelist"] == 2

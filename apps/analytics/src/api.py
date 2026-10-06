@@ -294,7 +294,7 @@ def cleaning_preview_imputation(
 @app.get("/api/cleaning/preview/outliers")
 def cleaning_preview_outliers(
     column: str = Query(default="annual_income"),
-    method: str = Query(default="iqr", pattern="^(iqr|zscore)$"),
+    method: str = Query(default="iqr", pattern="^(iqr|zscore|mad)$"),
     action: str = Query(default="cap", pattern="^(drop|cap|log)$"),
 ) -> dict:
     """Preview del tratamiento de outliers sobre una columna numérica."""
